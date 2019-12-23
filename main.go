@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"flag"
 	"fmt"
 	"log"
@@ -9,6 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 )
+
+var cleanBranches = flag.Bool("prune", false, "if set prunes orphaned local branches")
 
 func pathExists(path string) (bool, error) {
 	_, err := os.Lstat(path)
@@ -21,7 +24,26 @@ func pathExists(path string) (bool, error) {
 	return false, err
 }
 
-//git symbolic-ref --short HEAD
+func askForConfirmation(s string) bool {
+	reader := bufio.NewReader(os.Stdin)
+
+	for {
+		fmt.Printf("%s [y/n]: ", s)
+
+		response, err := reader.ReadString('\n')
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		response = strings.ToLower(strings.TrimSpace(response))
+
+		if response == "y" || response == "yes" {
+			return true
+		} else if response == "n" || response == "no" {
+			return false
+		}
+	}
+}
 
 func defaultBranch(path string) (string, error) {
 	cmd := exec.Command("git", "symbolic-ref", "--short", "HEAD")
@@ -62,6 +84,52 @@ func isClean(path string) (bool, error) {
 
 func pull(path string, branch string) error {
 	cmd := exec.Command("git", "pull", "origin", branch, "--ff-only")
+	cmd.Dir = path
+
+	return cmd.Run()
+}
+
+func localRefs(path string, branch string) ([]string, error) {
+	cmd := exec.Command("git", "for-each-ref", "--format", "%(refname) %(upstream)", "refs/heads")
+	cmd.Dir = path
+
+	outBytes, err := cmd.Output()
+	if err != nil {
+		return nil, err
+	}
+	output := strings.TrimSpace(string(outBytes))
+	lines := strings.Split(output, "\n")
+
+	var lrfs []string
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == ""  || strings.HasPrefix(line, "refs/heads/master") ||
+			strings.HasPrefix(line, "refs/heads/" + branch) {
+			continue
+		}
+
+		parts := strings.Split(line, " ")
+		if len(parts) == 2 {
+			continue
+		}
+
+		if !strings.HasPrefix(parts[0], "refs/heads/") {
+			continue
+		}
+
+		lrfs = append(lrfs, parts[0][len("refs/heads/"):])
+	}
+
+	return lrfs, nil
+}
+
+func deleteBranch(path string, localRef string) error {
+	ok := askForConfirmation(fmt.Sprintf("\tDo you really want to delete branch %s", localRef))
+	if !ok {
+		return nil
+	}
+
+	cmd := exec.Command("git", "branch", "-D", localRef)
 	cmd.Dir = path
 
 	return cmd.Run()
@@ -125,8 +193,26 @@ func processDir(root string, path string, info os.FileInfo, err error) error {
 	}
 
 	fmt.Printf("✅  %s updated\n", rel)
+
+	if *cleanBranches {
+		lrfs, err := localRefs(path, branch)
+		if err != nil {
+			fmt.Printf("\t❌ failed pruning orphaned branches %v\n", err)
+			return filepath.SkipDir
+		}
+
+		for _, lrf := range lrfs {
+			err = deleteBranch(path, lrf)
+			if err != nil {
+				fmt.Printf("\t❌ failed pruning orphaned branch %s %v\n", lrf, err)
+			} else {
+				fmt.Printf("\t✅ pruned orphaned branch %s\n", lrf)
+			}
+		}
+	}
 	return filepath.SkipDir
 }
+
 
 func main() {
 	flag.Parse()
