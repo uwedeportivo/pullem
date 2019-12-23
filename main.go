@@ -21,8 +21,10 @@ func pathExists(path string) (bool, error) {
 	return false, err
 }
 
+//git symbolic-ref --short HEAD
+
 func defaultBranch(path string) (string, error) {
-	cmd := exec.Command("git", "symbolic-ref", "--quiet", "refs/remotes/origin/HEAD")
+	cmd := exec.Command("git", "symbolic-ref", "--short", "HEAD")
 	cmd.Dir = path
 
 	outBytes, err := cmd.Output()
@@ -31,7 +33,6 @@ func defaultBranch(path string) (string, error) {
 	}
 	output := strings.TrimSpace(string(outBytes))
 
-	output = output[len("refs/remotes/origin/"):]
 	return output, nil
 }
 
