@@ -8,5 +8,5 @@ Before an update can happen it checks that
 * repo can be fast-forwarded
 * repo has a remote called `origin`
 
-If these conditions hold it does a `git pull origin master --ff-only` on it.
+If these conditions hold it does a `git pull origin {default-branch} --ff-only` on it.
  
